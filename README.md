@@ -1,5 +1,6 @@
 # QuarkGUI
-GUI for Quark by Echnobas
+GUI for Quark
+The actual quark.exe executable is made by Echnobas, all credits to him
 
 it's cool
 
