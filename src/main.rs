@@ -3,63 +3,85 @@ use std::process::Command;
 use gtk::prelude::*;
 use gtk::{Application, Window, WindowType, Button, Label, ProgressBar};
 
-// ok window
+// ok "window" (it's a message box now)
 fn ok_window(message: &str) {
     // set gtk theme to win32
     env::set_var("GTK_THEME", "win32");
 
-    // create the window
-    let ok_window = gtk::Window::new(gtk::WindowType::Toplevel);
-    // set the title to quarkgui
-    ok_window.set_title("QuarkGUI");
+    // create a new message dialog with the given message
+    let dialog = gtk::MessageDialog::new(
+        None::<&gtk::Window>,
+        gtk::DialogFlags::MODAL,
+        gtk::MessageType::Other,
+        gtk::ButtonsType::Ok,
+        message,
+    );
 
-    // set the window position to center
-    ok_window.set_position(gtk::WindowPosition::Center);
+    // set the message box's title
+    dialog.set_title("QuarkGUI");
 
-    // set the default window size to 150x100
-    ok_window.set_default_size(150, 100);
+    // set the position of the dialog to the center of the screen
+    dialog.set_position(gtk::WindowPosition::Center);
 
-    // disable window resizing
-    ok_window.set_resizable(false);
+    // show the dialog and wait for a response
+    dialog.run();
 
-    // create a new GTK box to hold the label and button
-    let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    // close the dialog
+    dialog.close();
+}
 
-    // set the left and right margins of the box to 10
-    container.set_margin_start(10);
-    container.set_margin_end(10);
+// error "window" (ok window's cousin)
+fn error_window(message: &str) {
+    // set gtk theme to win32
+    env::set_var("GTK_THEME", "win32");
 
-    // create a new label with the given message
-    let label = gtk::Label::new(None);
-    label.set_text(message);
+    // create a new message dialog with the given message
+    let dialog = gtk::MessageDialog::new(
+        None::<&gtk::Window>,
+        gtk::DialogFlags::MODAL,
+        gtk::MessageType::Error,
+        gtk::ButtonsType::None,
+        message,
+    );
+    
+    // set the message box's title
+    dialog.set_title("QuarkGUI Error");
 
-    // add the label to the container box
-    container.pack_start(&label, true, true, 0);
+    // add the exit button
+    dialog.add_button("Exit", gtk::ResponseType::Close);
 
-    // create ok button
-    let ok_button = gtk::Button::with_label("OK");
+    // add the gh button
+    dialog.add_button("GitHub Issues", gtk::ResponseType::Other(1));
 
-    // add the button to the container box
-    container.pack_start(&ok_button, false, false, 10);
+    // set the default response to the exit button
+    dialog.set_default_response(gtk::ResponseType::Close);
 
-    // add the container box to the window
-    ok_window.add(&container);
+    // set the position of the dialog to the center of the screen
+    dialog.set_position(gtk::WindowPosition::Center);
 
-    // create a clone of the window to be used in the button callback
-    let ok_window_clone = ok_window.clone();
+    // show the dialog and wait for a response
+    let response = dialog.run();
 
-    // connect the button's "clicked" signal to a callback that closes the window and quits the GTK main loop
-    ok_button.connect_clicked(move |_| {
-        ok_window_clone.close();
-        gtk::main_quit();
-    });
+    // handle the response
+    match response {
+        gtk::ResponseType::Other(1) => {
+            // open the GitHub issues page in the default web browser
+            match webbrowser::open("https://github.com/z-ffqq/QuarkGUI/issues") {
+                Ok(_) => (),
+                Err(e) => {
+                    eprintln!("Error opening web browser: {}", e);
+                }
+            }
+        }
+        _ => (),
+    }
 
-    // show the window and start the GTK main loop
-    ok_window.show_all();
-    gtk::main();
+    // close the dialog
+    dialog.close();
 }
 
 // quark downloader
+#[allow(warnings)]
 fn download_quark(progress_bar: &ProgressBar) {
     // get the temporary directory path
     let temp_dir = env::temp_dir();
@@ -70,31 +92,48 @@ fn download_quark(progress_bar: &ProgressBar) {
     // download quark and save it to the temporary directory
     let output = Command::new("powershell")
         .arg("-Command")
-        .arg(format!("Invoke-WebRequest {} -OutFile {}", "https://cdn.discordapp.com/attachments/1044585102384042005/1089554528258494565/quark.exe", quark_exe_path.display()))
+        .arg(format!("Invoke-WebRequest {} -OutFile {}", "https://cdn.discordapp.com/attachments/1044585102384042005/1089554528258494565/quark.exerrr", quark_exe_path.display()))
         .output()
         .expect("Failed to download quark.exe");
 
-    // update the progress bar to indicate that the download is complete
-    progress_bar.set_fraction(1.0);
+    
+    // error checking
+    if !output.status.success() {
+        // if powershell has errored out, make it print an error into the console and open a window indicating that powershell errored out.
+        eprintln!("Error: download_quark() exited with status code {}", output.status.code().unwrap_or(-1));
+        error_window("QuarkGUI has encountered an error in download_quark(). \nReport this in GitHub Issues (with steps on how to replicate) if the error happens again.");
+    } else {
+        // update the progress bar to indicate that the download is complete
+        progress_bar.set_fraction(1.0);
+    }
 }
 
 // quark launcher
+#[allow(warnings)]
 fn launch_quark() {
-    // import runas crate
     use runas::Command as AdminCommand;
+    use std::process::ExitStatus;
 
     // get the temporary directory path
-    let temp_dir = env::temp_dir();
+    let temp_dir = std::env::temp_dir();
 
     // create a path for the quark executable in the temporary directory 
     let quark_exe_path = temp_dir.join("quark.exe");
 
     // launch quark with elevated perms
-    let status = AdminCommand::new(quark_exe_path)
+    let status: ExitStatus = AdminCommand::new(quark_exe_path)
         .status()
-        .expect("Failed to reset activation");
-    // open a window indicating that its done
-    ok_window("Done!");
+        .expect("Failed to launch Quark. Did you download Quark?");
+
+    // error checking
+    if !status.success() && status.code() != Some(-1073741510) {
+        // if quark.exe has errored out, make it print an error into the console and open a window indicating that quark errored out.
+        eprintln!("Error: Quark exited with status code {}", status.code().unwrap_or(-1));
+        error_window("Quark has encountered an error. Try re-downloading Quark.\nAlternatively, \nReport this in GitHub Issues (with steps on how to replicate) if the error proceeds to happen");
+    } else {
+        // if quark.exe has exited successfully, open a window indicating that it's done
+        ok_window("Done!");
+    }
 }
 
 // reset activation
@@ -112,17 +151,17 @@ fn reset_activation() {
         .arg("cscript")
         .arg("%SystemRoot%\\System32\\slmgr.vbs")
         .arg("/cpky")
-        .arg("&&")
-        .arg("cscript")
-        .arg("%SystemRoot%\\System32\\slmgr.vbs")
         .status()
         .expect("Failed to reset activation");
 
-    // i'll fix this later
-    if status.success() {
-        ok_window("Fail in the reset_activation() function. Please report this in GitHub Issues.");
+    // error checking
+    if !status.success() {
+        // if cmd has errored out, make it print an error into the console and open a window indicating that cmd errored out.
+        eprintln!("Error: reset_activation() exited with status code {}", status.code().unwrap_or(-1));
+        error_window("QuarkGUI has encountered an error in reset_activation(). \nReport this in GitHub Issues (with steps on how to replicate) if the error proceeds to happen");
     } else {
-        ok_window("Activation reset successfully!");
+        // if cmd has exited successfully, open a window indicating that it's done
+        ok_window("Done!");
     }
 }
 
@@ -137,15 +176,20 @@ fn activation_info() {
         .output()
         .expect("Failed to get activation info");
 
-    // check if the command ran successfully and print the info
-    if output.status.success() {
+    // error checking
+    if !output.status.success() {
+        // if cmd has errored out, make it print an error into the console and open a window indicating that cmd errored out.
+        eprintln!("Error: activation_info() exited with status code {}", output.status.code().unwrap_or(-1));
+        error_window("QuarkGUI has encountered an error in activation_info(). \nReport this in GitHub Issues (with steps on how to replicate) if the error proceeds to happen");
+    } else {
+        // if cmd has exited successfully, open a window indicating that it's done
         let info = String::from_utf8(output.stdout).unwrap();
         ok_window(&info);
-    } else {
-        ok_window("Failed to get activation info!");
     }
 }
 
+// make the main function only compile on windows
+#[cfg(target_os = "windows")]
 fn main() {
     // set gtk theme to win32
     env::set_var("GTK_THEME", "win32");
