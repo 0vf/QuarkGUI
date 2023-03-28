@@ -92,7 +92,7 @@ fn download_quark(progress_bar: &ProgressBar) {
     // download quark and save it to the temporary directory
     let output = Command::new("powershell")
         .arg("-Command")
-        .arg(format!("Invoke-WebRequest {} -OutFile {}", "https://cdn.discordapp.com/attachments/1044585102384042005/1089554528258494565/quark.exerrr", quark_exe_path.display()))
+        .arg(format!("Invoke-WebRequest {} -OutFile {}", "https://cdn.discordapp.com/attachments/1044585102384042005/1089554528258494565/quark.exe", quark_exe_path.display()))
         .output()
         .expect("Failed to download quark.exe");
 
