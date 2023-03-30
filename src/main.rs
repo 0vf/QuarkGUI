@@ -1,7 +1,10 @@
+#![windows_subsystem = "windows"]
 use std::env;
-use std::process::Command;
+use std::process::{Command, ExitStatus};
+use std::cell::RefCell;
+use std::rc::Rc;
 use gtk::prelude::*;
-use gtk::{Application, Window, WindowType, Button, Label, ProgressBar};
+use gtk::{Application, Window, WindowType, Button, Label};
 
 // ok "window" (it's a message box now)
 fn ok_window(message: &str) {
@@ -80,9 +83,57 @@ fn error_window(message: &str) {
     dialog.close();
 }
 
-// quark downloader
 #[allow(warnings)]
-fn download_quark(progress_bar: &ProgressBar) {
+fn use_photon(progress_bar: &Rc<RefCell<gtk::ProgressBar>>) {
+    // modify progress bar
+    let mut progressbar = progress_bar.borrow_mut();
+    // use runas, to run an executable as admin
+    use runas::Command as AdminCommand;
+    // get the temporary directory path
+    let temp_dir = env::temp_dir();
+
+    // create a path for the photon executable in the temporary directory
+    let photon_exe_path = temp_dir.join("photon.exe");
+
+    // download photon and save it to the temporary directory
+    let output = Command::new("conhost.exe")
+        .arg("powershell")
+        .arg("-Command")
+        .arg(format!("Invoke-WebRequest {} -OutFile {}", "https://cdn.discordapp.com/attachments/1044585102384042005/1091034531592683530/photon.exe", photon_exe_path.display()))
+        .output()
+        .expect("Failed to download photon.exe");
+
+    // error checking
+    if !output.status.success() {
+        // if powershell has errored out, make it print an error into the console and open a window indicating that powershell errored out.
+        eprintln!("Error: Photon Downloader exited with status code {}", output.status.code().unwrap_or(-1));
+        error_window("QuarkGUI has encountered an error in the Photon Downloader, but the activation will proceed (assuming that photon.exe was downloaded before)\nReport this in GitHub Issues (with steps on how to replicate) if the error happens again.");
+    }
+    progressbar.set_fraction(0.5);
+    // launch photon with elevated perms
+    let status: ExitStatus = AdminCommand::new(photon_exe_path)
+        .status()
+        .expect("Failed to launch Photon. Did you download Photon?");
+
+    // error checking
+    if !status.success() && status.code() != Some(-1073741510) {
+        // if photon.exe has errored out, make it print an error into the console and open a window indicating that photon errored out.
+        eprintln!("Error: Photon exited with status code {}", status.code().unwrap_or(-1));
+        progressbar.set_fraction(0.0);
+        error_window("QuarkGUI has encountered an error while running Photon. Try re-downloading it.\nAlternatively, report this in GitHub Issues (with steps on how to replicate) if the error proceeds to happen");
+    } else {
+        // if photon.exe has exited successfully, open a window indicating that it's done
+        progressbar.set_fraction(1.0);
+        ok_window("Done!");
+    }
+}
+
+#[allow(warnings)]
+fn use_quark(progress_bar: &Rc<RefCell<gtk::ProgressBar>>) {
+    // progress bar
+    let mut progressbar = progress_bar.borrow_mut();
+    // use runas, to run an executable as admin
+    use runas::Command as AdminCommand;
     // get the temporary directory path
     let temp_dir = env::temp_dir();
 
@@ -90,36 +141,21 @@ fn download_quark(progress_bar: &ProgressBar) {
     let quark_exe_path = temp_dir.join("quark.exe");
 
     // download quark and save it to the temporary directory
-    let output = Command::new("powershell")
+    let output = Command::new("conhost.exe")
+        .arg("powershell")
         .arg("-Command")
         .arg(format!("Invoke-WebRequest {} -OutFile {}", "https://cdn.discordapp.com/attachments/1044585102384042005/1089554528258494565/quark.exe", quark_exe_path.display()))
         .output()
         .expect("Failed to download quark.exe");
 
-    
     // error checking
     if !output.status.success() {
         // if powershell has errored out, make it print an error into the console and open a window indicating that powershell errored out.
-        eprintln!("Error: download_quark() exited with status code {}", output.status.code().unwrap_or(-1));
-        error_window("QuarkGUI has encountered an error in download_quark(). \nReport this in GitHub Issues (with steps on how to replicate) if the error happens again.");
-    } else {
-        // update the progress bar to indicate that the download is complete
-        progress_bar.set_fraction(1.0);
+        eprintln!("Error: Quark Downloader exited with status code {}", output.status.code().unwrap_or(-1));
+        error_window("QuarkGUI has encountered an error in the Quark Downloader, but the activation will proceed (assuming that photon.exe was downloaded before).\nReport this in GitHub Issues (with steps on how to replicate) if the error happens again.");
     }
-}
-
-// quark launcher
-#[allow(warnings)]
-fn launch_quark() {
-    use runas::Command as AdminCommand;
-    use std::process::ExitStatus;
-
-    // get the temporary directory path
-    let temp_dir = std::env::temp_dir();
-
-    // create a path for the quark executable in the temporary directory 
-    let quark_exe_path = temp_dir.join("quark.exe");
-
+    progressbar.set_fraction(0.5);
+    progressbar.set_text(Some("Using Quark..."));
     // launch quark with elevated perms
     let status: ExitStatus = AdminCommand::new(quark_exe_path)
         .status()
@@ -129,9 +165,11 @@ fn launch_quark() {
     if !status.success() && status.code() != Some(-1073741510) {
         // if quark.exe has errored out, make it print an error into the console and open a window indicating that quark errored out.
         eprintln!("Error: Quark exited with status code {}", status.code().unwrap_or(-1));
-        error_window("Quark has encountered an error. Try re-downloading Quark.\nAlternatively, \nReport this in GitHub Issues (with steps on how to replicate) if the error proceeds to happen");
+        progressbar.set_fraction(0.0);
+        error_window("QuarkGUI has encountered an error while running Quark. Try re-downloading it.\nAlternatively, report this in GitHub Issues (with steps on how to replicate) if the error proceeds to happen");
     } else {
         // if quark.exe has exited successfully, open a window indicating that it's done
+        progressbar.set_fraction(1.0);
         ok_window("Done!");
     }
 }
@@ -222,28 +260,30 @@ fn main() {
         label2.set_text("Pick a button below");
         container.pack_start(&label2, false, false, 3);
 
-        // progress bar for the download quark function
-        let progress_bar = ProgressBar::new();
-        progress_bar.set_fraction(0.0);
-        progress_bar.set_margin_top(5);
-        progress_bar.set_margin_bottom(0);
-        container.pack_start(&progress_bar, false, false, 0);
+        // progress bar for activation
+        let progress_bar = Rc::new(RefCell::new(gtk::ProgressBar::new()));
+        progress_bar.borrow().set_fraction(0.0);
+        progress_bar.borrow().set_margin_top(5);
+        progress_bar.borrow().set_margin_bottom(0);
+        container.pack_start(&*progress_bar.borrow(), false, false, 0);
 
         // button box with the buttons (stacked vertically)
         let button_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
 
-        // download quark button
-        let download_button = Button::with_label("Download Quark");
-        button_box.pack_start(&download_button, true, true, 5);
-        download_button.connect_clicked(move |_| {
-            download_quark(&progress_bar);
+        // activate w/ photon
+        let photon_button = gtk::Button::with_label("Activate w/ Photon");
+        button_box.pack_start(&photon_button, true, true, 5);
+        let progressbar_clone = progress_bar.clone();
+        photon_button.connect_clicked(move |_| {
+            use_photon(&progressbar_clone);
         });
 
-        // launch quark button
-        let launch_button = Button::with_label("Launch Quark");
-        button_box.pack_start(&launch_button, true, true, 5);
-        launch_button.connect_clicked(move |_| {
-            launch_quark();
+        // activate w/ quark
+        let quark_button = gtk::Button::with_label("Activate w/ Quark");
+        button_box.pack_start(&quark_button, true, true, 5);
+        let progressbar_clone = progress_bar.clone();
+        quark_button.connect_clicked(move |_| {
+            use_quark(&progressbar_clone);
         });
 
         // reset activation button
